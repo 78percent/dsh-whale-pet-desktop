@@ -1,0 +1,44 @@
+{
+  "name": "whale-pet-desktop",
+  "productName": "WhalePet",
+  "version": "0.1.1",
+  "description": "Windows whale companion for Codex, Claude Code and DeepSeek Harness",
+  "author": "78percent; based on luweiyabo/dsh-whale-pet",
+  "homepage": "https://github.com/78percent/dsh-whale-pet-desktop",
+  "repository": { "type": "git", "url": "https://github.com/78percent/dsh-whale-pet-desktop.git", "directory": "desktop" },
+  "license": "SEE LICENSE IN ../LICENSE",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "electron .",
+    "package": "npm run build && electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
+    "esbuild": "0.28.2",
+    "pngjs": "7.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "build": {
+    "appId": "local.whalepet.desktop",
+    "productName": "WhalePet",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "directories": { "output": "../release", "buildResources": "build" },
+    "files": ["*.mjs", "preload.cjs", "integrations/**/*", "dist/**/*", "package.json", "README.md", "!build.mjs"],
+    "extraResources": [
+      {"from": "../assets", "to": "assets", "filter": ["thumb/**/*", "plugin-logo.png"]},
+      {"from": "../LICENSE", "to": "notices/UPSTREAM-LICENSE"},
+      {"from": "../THIRD_PARTY_ASSETS.md", "to": "notices/THIRD_PARTY_ASSETS.md"},
+      {"from": "../THIRD_PARTY_NOTICES.md", "to": "notices/THIRD_PARTY_NOTICES.md"},
+      {"from": "dsh-bridge", "to": "dsh-bridge", "filter": ["lib/**/*", "package.json", "cordis.patch.yml", "README.md", "LICENSE"]}
+    ],
+    "win": { "target": ["portable"], "icon": "build/icon.ico", "signAndEditExecutable": false },
+    "portable": { "artifactName": "WhalePet-${version}.exe" },
+    "npmRebuild": false
+  }
+}

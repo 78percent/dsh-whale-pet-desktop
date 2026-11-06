@@ -1,0 +1,3 @@
+- insert:
+    - id: whale-pet-desktop-bridge
+      name: '@whale-pet/desktop-bridge'

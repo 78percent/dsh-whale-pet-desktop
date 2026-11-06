@@ -7,3 +7,9 @@ node_modules/
 *.log
 .vscode/
 .DS_Store
+desktop/dist/
+desktop/build/
+.cache/
+release/
+docs/superpowers/
+desktop/dsh-bridge/lib/client.js

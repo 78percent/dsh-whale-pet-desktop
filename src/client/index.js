@@ -825,6 +825,9 @@ window.__ModuleLoader__.load({
             useEffect(() => {
                 if (!store) return;
                 var un = store.subscribe((v) => {
+                    // Native activity notifications can arrive in the same batch as settings.
+                    // Publish the current configuration before an intent callback reads it.
+                    if (api && api.desktopMode) cfgRef.current = v;
                     setCfg(v);
                 });
                 store.load();
@@ -1191,6 +1194,14 @@ window.__ModuleLoader__.load({
             // 播完按概率选下一个；概率与动作池读设置配置，缺省用代码默认。
             // 点击/拖拽打断的动画播完后先回待机（缓冲），待机播完再进随机链。
             var pickNext = () => {
+                if (api && api.desktopMode && intentRef.current !== INTENT.IDLE && !dragRef.current.active) {
+                    var desktopPool = intentActionsRef.current || [];
+                    var desktopAnim = pickFrom(desktopPool);
+                    if (desktopAnim) {
+                        playNext(desktopAnim, false);
+                        return;
+                    }
+                }
                 var b = (cfgRef.current && cfgRef.current.behavior) || DEFAULT_CONFIG.behavior;
                 var acts = (cfgRef.current && cfgRef.current.pools && cfgRef.current.pools.acts) || ACTS;
                 var moves = (cfgRef.current && cfgRef.current.pools && cfgRef.current.pools.moves) || MOVES;
@@ -1255,7 +1266,7 @@ window.__ModuleLoader__.load({
             // 仲裁器输出意图时抢占播放对应动作；用户交互/交互动画进行中不抢占。
             // 参数经 arbOptsRef 动态读取（设置自动保存即热生效，不重建事件流）。
             useEffect(() => {
-                if (!api || (!api.events && !api.subscribeActivity)) return;
+                if (!api || (!api.events && !api.subscribeActivity && !api.desktopSubscribeIntent)) return;
                 var arbiter = createArbiter(arbOptsRef.current);
                 var onIntent = (intent) => {
                     var prev = intentRef.current;
@@ -1284,7 +1295,9 @@ window.__ModuleLoader__.load({
                     // 规则意图优先用规则自定义气泡文案
                     if (intent !== INTENT.IDLE) {
                         var cNow = cfgRef.current;
-                        if (cNow && cNow.meter) {
+                        if (api.desktopStatusLabel) {
+                            showBubble(api.desktopStatusLabel());
+                        } else if (cNow && cNow.meter) {
                             showMeterBubble();
                         } else if (isRule && ruleDef && ruleDef.bubble) {
                             showBubble(ruleDef.bubble);
@@ -1296,6 +1309,12 @@ window.__ModuleLoader__.load({
                         }
                     }
                     if (intent === INTENT.IDLE || !pool.length) {
+                        if (api.desktopMode) {
+                            intentActionRef.current = null;
+                            if (prev !== INTENT.IDLE && !dragRef.current.active && !hideRef.current.active)
+                                pickNext();
+                            return;
+                        }
                         // 意图消退（或该意图池被清空）：仅从非 IDLE 回落时收尾。
                         // 已完成的一次性意图动作已经进入自主链，不应再次切换；
                         // 尚未完成则让当前视频自然播完。
@@ -1335,12 +1354,12 @@ window.__ModuleLoader__.load({
                         return;
                     }
                     intentActionRef.current = { intent: intent, anim: nextAnim, completed: false };
-                    playNext(nextAnim, intentActionIsOnce(intent)); // 所有事件意图每次只完整播放一个动作
+                    playNext(nextAnim, api.desktopMode ? false : intentActionIsOnce(intent));
                 };
                 var unsub = arbiter.subscribe(onIntent);
                 // 初始同步一次当前意图（让 intentRef 就位）
                 unsub && onIntent(INTENT.IDLE);
-                var stop = startActivitySensor(api, (state) => arbiter.update(state.active), {
+                var stop = api.desktopSubscribeIntent ? api.desktopSubscribeIntent(onIntent) : startActivitySensor(api, (state) => arbiter.update(state.active), {
                     scope: cfgRef.current?.scope,
                     errorHoldMs: () => arbOptsRef.current.errorHoldMs,
                     // 触发规则：读取器模式（cfgRef 动态读，设置自动保存即热生效）
@@ -1490,9 +1509,15 @@ window.__ModuleLoader__.load({
                     )
                         return;
                     if (moveToRef.current) moveToRef.current(e.clientX, e.clientY);
+                    if (api && api.desktopMode) setSelected(false);
                 };
+                var onEscape = (e) => { if (e.key === 'Escape') setSelected(false); };
                 window.addEventListener('click', onClick);
-                return () => window.removeEventListener('click', onClick);
+                window.addEventListener('keydown', onEscape);
+                return () => {
+                    window.removeEventListener('click', onClick);
+                    window.removeEventListener('keydown', onEscape);
+                };
             }, [selected]);
 
             // ============================================================================
@@ -2131,7 +2156,7 @@ window.__ModuleLoader__.load({
                         setPeek(edgeZoneHit(e.clientX, e.clientY, hideRef.current.edge));
                     }
                     // 回待机并循环（拖完先安静地呼吸，点击后再进行为链）
-                    playNext(IDLE, false);
+                    playNext(IDLE, !!(api && api.desktopMode && intentRef.current !== INTENT.IDLE));
                 }
                 // 没拖过：交给 handleClick
             };
@@ -2169,6 +2194,8 @@ window.__ModuleLoader__.load({
                     anim = pickFrom(zoneClicks.length ? zoneClicks : clicks) || IDLE; // 全悬空回落待机
                 }
                 playNext(anim, true);
+                // Desktop blank space remains click-through; target selection is explicit in its menu.
+                if (api && api.desktopMode) return;
                 // 切换选中态：选中后点击屏幕即可让宠物走过去
                 var next = !selected;
                 setSelected(next);
@@ -2189,6 +2216,10 @@ window.__ModuleLoader__.load({
                 if (dragRef.current.active || dragRef.current.dragging) return; // 拖拽中不弹
                 e.preventDefault(); // 屏蔽浏览器默认菜单
                 e.stopPropagation();
+                if (api && api.desktopContextMenu) {
+                    api.desktopContextMenu();
+                    return;
+                }
                 // 钳制在视口内（菜单约 160×120）
                 var x = Math.min(e.clientX, window.innerWidth - 170);
                 var y = Math.min(e.clientY, window.innerHeight - 130);
@@ -2398,6 +2429,28 @@ window.__ModuleLoader__.load({
                 onPointerCancel: handlePointerUp,
                 title: 'dsh-whale-pet',
             };
+
+            // Native desktop commands keep the browser plugin's default behavior unchanged.
+            useEffect(() => {
+                if (!api || !api.desktopCommands) return;
+                return api.desktopCommands((command) => {
+                    if (command.type === 'home') menuGoHome();
+                    if (command.type === 'preview' && animEntry(command.id)) playNext(command.id, true);
+                    if (command.type === 'target') {
+                        setSelected(true);
+                        showBubble('点击目的地 · Esc 取消');
+                    }
+                    if (command.type === 'position') {
+                        stopDrive();
+                        stopInertia();
+                        setSliding(false);
+                        setSelected(false);
+                        setHide({ active: false, edge: null });
+                        setPeek(false);
+                        setCustomPos({ rx: command.x / command.width, ry: command.y / command.height });
+                    }
+                });
+            }, [api]);
 
             // 显示开关：visible=false 时隐藏桌宠（组件不渲染 DOM；hooks 继续运行，
             // 重新开启时视频元素重建、状态保留在 refs 中）
